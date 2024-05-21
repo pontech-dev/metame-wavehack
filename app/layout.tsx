@@ -45,7 +45,6 @@ export default function RootLayout({ children }: RootLayoutProps) {
           GeistMono.variable
         )}
       >
-        <KasadaClient />
         <Toaster position="top-center" />
         <Providers
           attribute="class"
