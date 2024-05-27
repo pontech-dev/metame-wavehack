@@ -41,11 +41,6 @@ export function ChatPanel({
       heading: 'Recommend NFTs for wallet:',
       subheading: '0xd8da6bf26964af9d7e...',
       message: `List recommended nfts for wallet address: 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 `
-    },
-    {
-      heading: 'What is the status',
-      subheading: 'of flight BA142?',
-      message: 'What is the status of flight BA142?'
     }
   ]
 
