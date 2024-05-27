@@ -22,13 +22,21 @@ import { auth } from '@/auth'
 import { FlightStatus } from '@/components/flights/flight-status'
 import { SelectSeats } from '@/components/flights/select-seats'
 import { ListFlights } from '@/components/flights/list-flights'
+import { ListNFTs } from '@/components/nfts/list-nfts'
+import { ListOrders } from '@/components/nfts/list-orders'
 import { BoardingPass } from '@/components/flights/boarding-pass'
 import { PurchaseTickets } from '@/components/flights/purchase-ticket'
 import { CheckIcon, SpinnerIcon } from '@/components/ui/icons'
 import { format } from 'date-fns'
-import { experimental_streamText } from 'ai'
+import {
+  experimental_streamText,
+  OpenAIStream,
+  StreamingTextResponse
+} from 'ai'
 import { google } from 'ai/google'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
+
 import { z } from 'zod'
 import { ListHotels } from '@/components/hotels/list-hotels'
 import { Destinations } from '@/components/flights/destinations'
@@ -38,6 +46,289 @@ import { rateLimit } from './ratelimit'
 const genAI = new GoogleGenerativeAI(
   process.env.GOOGLE_GENERATIVE_AI_API_KEY || ''
 )
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || ''
+})
+
+// ウォレットアドレスに対しておすすめのNFTを取得する関数
+async function getRecommendedNFTs(
+  walletAddress: string,
+  chainId: number = 1,
+  limit: number = 3,
+  genre: string = 'art'
+) {
+  const url =
+    'https://nft-hackathon.api-ai.d-metacommunication-stg.com/match/user'
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-API-Key': 'hackason-opensea-2024_XXX'
+  }
+  const payload = {
+    chain_id: chainId,
+    wallet_address: walletAddress,
+    limit: limit,
+    genre: genre
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload)
+    })
+    console.log('response:', response)
+    if (!response.ok) {
+      throw new Error('Network response was not ok')
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching recommended NFTs:', error)
+    throw error
+  }
+}
+
+const getNFTDetails = async (contractAddress: string, tokenId: string) => {
+  const url = `https://api.opensea.io/api/v2/chain/ethereum/contract/${contractAddress}/nfts/${tokenId}`
+  const headers = {
+    accept: 'application/json',
+    'x-api-key': process.env.OPENSEA_API_KEY || ''
+  }
+
+  try {
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      throw new Error(`Network response was not ok: ${response.statusText}`)
+    }
+    const data = await response.json()
+    return data.nft
+  } catch (error) {
+    console.error('Error fetching NFT details:', error)
+    throw error
+  }
+}
+
+const getNFTOrders = async (contractAddress: string, tokenId: string) => {
+  const url = `https://api.opensea.io/api/v2/orders/ethereum/seaport/listings?asset_contract_address=${contractAddress}&token_ids=${tokenId}&limit=5`
+  const headers = {
+    accept: 'application/json',
+    'x-api-key': process.env.OPENSEA_API_KEY || ''
+  }
+
+  try {
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      throw new Error(`Network response was not ok: ${response.statusText}`)
+    }
+    const data = await response.json()
+    console.log(data, 'data')
+    return data
+  } catch (error) {
+    console.error('Error fetching NFT details:', error)
+    throw error
+  }
+}
+
+// Function definition:
+const functions: ChatCompletionCreateParams.Function[] = [
+  {
+    name: 'getRecommendedNFTs',
+    description: 'Get recommended NFTs for wallet',
+    parameters: {
+      type: 'object',
+      properties: {
+        wallet_address: { type: 'string' },
+        chain_id: { type: 'integer', default: 1 },
+        limit: { type: 'integer', default: 3 },
+        genre: {
+          type: 'string',
+          default: 'art',
+          enum: ['art', 'music', 'game', 'membership', 'pfp', 'photo', 'world']
+        }
+      },
+      required: ['wallet_address']
+    }
+  },
+  {
+    name: 'getNFTOrders',
+    description: 'Get orders for a given NFT contractAddress and tokenId',
+    parameters: {
+      type: 'object',
+      properties: {
+        contractAddress: { type: 'string' },
+        tokenId: { type: 'string' }
+      },
+      required: ['contractAddress', 'tokenId']
+    }
+  }
+]
+
+async function submitUserMessage(content: string) {
+  'use server'
+
+  await rateLimit()
+
+  console.log(content, 'content')
+
+  const messages = [
+    {
+      role: 'system',
+      content: `You are a helpful assistant. 
+        Here's the flow: 
+        1. List Reccomended nfts for a given wallet address.
+        2. List Opensea's orders for a selected NFT.
+        3. Choose an Order.
+        4. fulfill the Order (purchase the NFT).
+        `
+    },
+    {
+      role: 'user',
+      content
+    }
+  ]
+
+  console.log(messages, 'messages')
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: messages,
+      functions: functions
+    })
+
+    console.log(response.choices[0].message, 'response')
+    console.log(response.choices[0].message?.function_call?.arguments)
+
+    // 引数をparse
+
+    const aiState = getMutableAIState()
+
+    const textStream = createStreamableValue('')
+    const spinnerStream = createStreamableUI(<SpinnerMessage />)
+    const messageStream = createStreamableUI(null)
+    const uiStream = createStreamableUI()
+    if (
+      response.choices[0].message?.function_call?.name === 'getRecommendedNFTs'
+    ) {
+      const { wallet_address, chain_id, limit, genre } = JSON.parse(
+        response.choices[0].message?.function_call?.arguments
+      )
+
+      // const chain_id = 1
+      // const wallet_address = '0xd8da6bf26964af9d7eed9e03e53415d37aa96045'
+      // const limit = 3
+      // const genre = 'art'
+
+      const nfts = await getRecommendedNFTs(
+        wallet_address,
+        chain_id,
+        limit,
+        genre
+      )
+      console.log(nfts, 'nfts')
+
+      const nftDetailsPromises = nfts?.items.map(
+        (nft: { contract_address: string; token_id: string }) =>
+          getNFTDetails(nft.contract_address, nft.token_id)
+      )
+
+      const nftDetails = await Promise.all(nftDetailsPromises)
+
+      console.log(nftDetails, 'nftDetails')
+
+      aiState.update({
+        ...aiState.get(),
+        messages: [
+          ...aiState.get().messages,
+          {
+            id: nanoid(),
+            role: 'user',
+            content: `${aiState.get().interactions.join('\n\n')}\n\n${content}`
+          }
+        ]
+      })
+
+      uiStream.update(
+        <BotCard>
+          <ListNFTs nfts={nftDetails} args={{ wallet_address, genre }} />
+        </BotCard>
+      )
+
+      aiState.done({
+        ...aiState.get(),
+        interactions: [],
+        messages: [
+          ...aiState.get().messages,
+          {
+            id: nanoid(),
+            role: 'assistant',
+            content:
+              "Here's a list of NFTs for you. Choose one and we can proceed to pick a seat.",
+            display: {
+              name: 'showNFTs',
+              props: {
+                summary: nftDetails
+              }
+            }
+          }
+        ]
+      })
+    } else if (
+      response.choices[0].message?.function_call?.name === 'getNFTOrders'
+    ) {
+      const { contractAddress, tokenId } = JSON.parse(
+        response.choices[0].message?.function_call?.arguments
+      )
+      console.log(contractAddress, tokenId, 'contract_address, token_id')
+
+      const orders = await getNFTOrders(contractAddress, tokenId)
+      console.log(orders, 'orders')
+      console.log(orders.orders[0].maker)
+      console.log(orders.orders[0])
+
+      uiStream.update(
+        <BotCard>
+          <ListOrders orders={orders.orders} />
+        </BotCard>
+      )
+    }
+
+    return {
+      id: nanoid(),
+      attachments: uiStream.value,
+      spinner: spinnerStream.value,
+      display: messageStream.value
+    }
+  } catch (error) {
+    console.error('Error calling OpenAI function:', error)
+  }
+}
+
+async function purchaseNFT(orderHash: string) {
+  'use server'
+
+  await rateLimit()
+
+  console.log(orderHash, 'orderHash kkkkkkk')
+
+  const spinnerStream = createStreamableUI(<SpinnerMessage />)
+  const messageStream = createStreamableUI(null)
+  const uiStream = createStreamableUI()
+
+  uiStream.update(
+    <BotCard>
+      <PurchaseTickets />
+    </BotCard>
+  )
+
+  return {
+    id: nanoid(),
+    attachments: uiStream.value,
+    spinner: spinnerStream.value,
+    display: messageStream.value
+  }
+}
 
 async function describeImage(imageBase64: string) {
   'use server'
@@ -116,362 +407,6 @@ async function describeImage(imageBase64: string) {
       )
       uiStream.error(error)
       spinnerStream.error(error)
-      messageStream.error(error)
-      aiState.done()
-    }
-  })()
-
-  return {
-    id: nanoid(),
-    attachments: uiStream.value,
-    spinner: spinnerStream.value,
-    display: messageStream.value
-  }
-}
-
-async function submitUserMessage(content: string) {
-  'use server'
-
-  await rateLimit()
-
-  const aiState = getMutableAIState()
-
-  aiState.update({
-    ...aiState.get(),
-    messages: [
-      ...aiState.get().messages,
-      {
-        id: nanoid(),
-        role: 'user',
-        content: `${aiState.get().interactions.join('\n\n')}\n\n${content}`
-      }
-    ]
-  })
-
-  const history = aiState.get().messages.map(message => ({
-    role: message.role,
-    content: message.content
-  }))
-  // console.log(history)
-
-  const textStream = createStreamableValue('')
-  const spinnerStream = createStreamableUI(<SpinnerMessage />)
-  const messageStream = createStreamableUI(null)
-  const uiStream = createStreamableUI()
-
-  ;(async () => {
-    try {
-      const result = await experimental_streamText({
-        model: google.generativeAI('models/gemini-1.0-pro-001'),
-        temperature: 0,
-        tools: {
-          listDestinations: {
-            description: 'List destination cities, max 5.',
-            parameters: z.object({
-              destinations: z.array(
-                z
-                  .string()
-                  .describe(
-                    'List of destination cities. Include rome as one of the cities.'
-                  )
-              )
-            })
-          },
-          showFlights: {
-            description:
-              "List available flights in the UI. List 3 that match user's query.",
-            parameters: z.object({
-              departingCity: z.string(),
-              arrivalCity: z.string(),
-              departingAirport: z.string().describe('Departing airport code'),
-              arrivalAirport: z.string().describe('Arrival airport code'),
-              date: z
-                .string()
-                .describe(
-                  "Date of the user's flight, example format: 6 April, 1998"
-                )
-            })
-          },
-          showSeatPicker: {
-            description:
-              'Show the UI to choose or change seat for the selected flight.',
-            parameters: z.object({
-              departingCity: z.string(),
-              arrivalCity: z.string(),
-              flightCode: z.string(),
-              date: z.string()
-            })
-          },
-          showHotels: {
-            description: 'Show the UI to choose a hotel for the trip.',
-            parameters: z.object({})
-          },
-          checkoutBooking: {
-            description:
-              'Show the UI to purchase/checkout a flight and hotel booking.',
-            parameters: z.object({})
-          },
-          showBoardingPass: {
-            description: "Show user's imaginary boarding pass.",
-            parameters: z.object({
-              airline: z.string(),
-              arrival: z.string(),
-              departure: z.string(),
-              departureTime: z.string(),
-              arrivalTime: z.string(),
-              price: z.number(),
-              seat: z.string(),
-              date: z
-                .string()
-                .describe('Date of the flight, example format: 6 April, 1998'),
-              gate: z.string()
-            })
-          },
-          showFlightStatus: {
-            description:
-              'Get the current status of imaginary flight by flight number and date.',
-            parameters: z.object({
-              flightCode: z.string(),
-              date: z.string(),
-              departingCity: z.string(),
-              departingAirport: z.string(),
-              departingAirportCode: z.string(),
-              departingTime: z.string(),
-              arrivalCity: z.string(),
-              arrivalAirport: z.string(),
-              arrivalAirportCode: z.string(),
-              arrivalTime: z.string()
-            })
-          }
-        },
-        system: `\
-      You are a friendly assistant that helps the user with booking flights to destinations that are based on a list of books. You can you give travel recommendations based on the books, and will continue to help the user book a flight to their destination.
-  
-      The date today is ${format(new Date(), 'd LLLL, yyyy')}. 
-      The user's current location is San Francisco, CA, so the departure city will be San Francisco and airport will be San Francisco International Airport (SFO). The user would like to book the flight out on May 12, 2024.
-
-      List United Airlines flights only.
-      
-      Here's the flow: 
-        1. List holiday destinations based on a collection of books.
-        2. List flights to destination.
-        3. Choose a flight.
-        4. Choose a seat.
-        5. Choose hotel
-        6. Purchase booking.
-        7. Show boarding pass.
-      `,
-        messages: [...history]
-      })
-
-      let textContent = ''
-      spinnerStream.done(null)
-
-      for await (const delta of result.fullStream) {
-        const { type } = delta
-
-        if (type === 'text-delta') {
-          const { textDelta } = delta
-
-          textContent += textDelta
-          messageStream.update(<BotMessage content={textContent} />)
-
-          aiState.update({
-            ...aiState.get(),
-            messages: [
-              ...aiState.get().messages,
-              {
-                id: nanoid(),
-                role: 'assistant',
-                content: textContent
-              }
-            ]
-          })
-        } else if (type === 'tool-call') {
-          const { toolName, args } = delta
-
-          if (toolName === 'listDestinations') {
-            const { destinations } = args
-
-            uiStream.update(
-              <BotCard>
-                <Destinations destinations={destinations} />
-              </BotCard>
-            )
-
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content: `Here's a list of holiday destinations based on the books you've read. Choose one to proceed to booking a flight. \n\n ${args.destinations.join(', ')}.`,
-                  display: {
-                    name: 'listDestinations',
-                    props: {
-                      destinations
-                    }
-                  }
-                }
-              ]
-            })
-          } else if (toolName === 'showFlights') {
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content:
-                    "Here's a list of flights for you. Choose one and we can proceed to pick a seat.",
-                  display: {
-                    name: 'showFlights',
-                    props: {
-                      summary: args
-                    }
-                  }
-                }
-              ]
-            })
-
-            uiStream.update(
-              <BotCard>
-                <ListFlights summary={args} />
-              </BotCard>
-            )
-          } else if (toolName === 'showSeatPicker') {
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content:
-                    "Here's a list of available seats for you to choose from. Select one to proceed to payment.",
-                  display: {
-                    name: 'showSeatPicker',
-                    props: {
-                      summary: args
-                    }
-                  }
-                }
-              ]
-            })
-
-            uiStream.update(
-              <BotCard>
-                <SelectSeats summary={args} />
-              </BotCard>
-            )
-          } else if (toolName === 'showHotels') {
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content:
-                    "Here's a list of hotels for you to choose from. Select one to proceed to payment.",
-                  display: {
-                    name: 'showHotels',
-                    props: {}
-                  }
-                }
-              ]
-            })
-
-            uiStream.update(
-              <BotCard>
-                <ListHotels />
-              </BotCard>
-            )
-          } else if (toolName === 'checkoutBooking') {
-            aiState.done({
-              ...aiState.get(),
-              interactions: []
-            })
-
-            uiStream.update(
-              <BotCard>
-                <PurchaseTickets />
-              </BotCard>
-            )
-          } else if (toolName === 'showBoardingPass') {
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content:
-                    "Here's your boarding pass. Please have it ready for your flight.",
-                  display: {
-                    name: 'showBoardingPass',
-                    props: {
-                      summary: args
-                    }
-                  }
-                }
-              ]
-            })
-
-            uiStream.update(
-              <BotCard>
-                <BoardingPass summary={args} />
-              </BotCard>
-            )
-          } else if (toolName === 'showFlightStatus') {
-            aiState.update({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content: `The flight status of ${args.flightCode} is as follows:
-                Departing: ${args.departingCity} at ${args.departingTime} from ${args.departingAirport} (${args.departingAirportCode})
-                `
-                }
-              ],
-              display: {
-                name: 'showFlights',
-                props: {
-                  summary: args
-                }
-              }
-            })
-
-            uiStream.update(
-              <BotCard>
-                <FlightStatus summary={args} />
-              </BotCard>
-            )
-          }
-        }
-      }
-
-      uiStream.done()
-      textStream.done()
-      messageStream.done()
-    } catch (e) {
-      console.error(e)
-
-      const error = new Error(
-        'The AI got rate limited, please try again later.'
-      )
-      uiStream.error(error)
-      textStream.error(error)
       messageStream.error(error)
       aiState.done()
     }
@@ -599,7 +534,8 @@ export const AI = createAI<AIState, UIState>({
     submitUserMessage,
     requestCode,
     validateCode,
-    describeImage
+    describeImage,
+    purchaseNFT
   },
   initialUIState: [],
   initialAIState: { chatId: nanoid(), interactions: [], messages: [] },
@@ -676,6 +612,10 @@ export const getUIStateFromAIState = (aiState: Chat) => {
               <BoardingPass summary={message.display.props.summary} />
             </BotCard>
           ) : message.display?.name === 'listDestinations' ? (
+            <BotCard>
+              <Destinations destinations={message.display.props.destinations} />
+            </BotCard>
+          ) : message.display?.name === 'showNFTs' ? (
             <BotCard>
               <Destinations destinations={message.display.props.destinations} />
             </BotCard>

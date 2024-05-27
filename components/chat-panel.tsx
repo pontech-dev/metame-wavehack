@@ -38,9 +38,9 @@ export function ChatPanel({
 
   const exampleMessages = [
     {
-      heading: 'List flights flying from',
-      subheading: 'San Francisco to Rome today',
-      message: `List flights flying from San Francisco to Rome today`
+      heading: 'Recommend NFTs for wallet:',
+      subheading: '0xd8da6bf26964af9d7e...',
+      message: `List recommended nfts for wallet address: 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 `
     },
     {
       heading: 'What is the status',
@@ -79,6 +79,8 @@ export function ChatPanel({
                     const responseMessage = await submitUserMessage(
                       example.message
                     )
+
+                    console.log(responseMessage)
 
                     setMessages(currentMessages => [
                       ...currentMessages,
