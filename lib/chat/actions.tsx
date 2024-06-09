@@ -24,6 +24,7 @@ import { SelectSeats } from '@/components/flights/select-seats'
 import { ListFlights } from '@/components/flights/list-flights'
 import { ListNFTs } from '@/components/nfts/list-nfts'
 import { ListOrders } from '@/components/nfts/list-orders'
+import { PurchaseNFT } from '@/components/nfts/purchase-nft'
 import { BoardingPass } from '@/components/flights/boarding-pass'
 import { PurchaseTickets } from '@/components/flights/purchase-ticket'
 import { CheckIcon, SpinnerIcon } from '@/components/ui/icons'
@@ -93,7 +94,7 @@ const getNFTDetails = async (contractAddress: string, tokenId: string) => {
   const url = `https://api.opensea.io/api/v2/chain/ethereum/contract/${contractAddress}/nfts/${tokenId}`
   const headers = {
     accept: 'application/json',
-    'x-api-key': process.env.OPENSEA_API_KEY || ''
+    'x-api-key': process.env.NEXT_PUBLIC_OPENSEA_API_KEY || ''
   }
 
   try {
@@ -113,7 +114,7 @@ const getNFTOrders = async (contractAddress: string, tokenId: string) => {
   const url = `https://api.opensea.io/api/v2/orders/ethereum/seaport/listings?asset_contract_address=${contractAddress}&token_ids=${tokenId}&limit=5`
   const headers = {
     accept: 'application/json',
-    'x-api-key': process.env.OPENSEA_API_KEY || ''
+    'x-api-key': process.env.NEXT_PUBLIC_OPENSEA_API_KEY || ''
   }
 
   try {
@@ -150,9 +151,21 @@ const functions: ChatCompletionCreateParams.Function[] = [
       required: ['wallet_address']
     }
   },
+  // {
+  //   name: 'getNFTOrders',
+  //   description: 'Get orders for a given NFT contractAddress and tokenId',
+  //   parameters: {
+  //     type: 'object',
+  //     properties: {
+  //       contractAddress: { type: 'string' },
+  //       tokenId: { type: 'string' }
+  //     },
+  //     required: ['contractAddress', 'tokenId']
+  //   }
+  // },
   {
-    name: 'getNFTOrders',
-    description: 'Get orders for a given NFT contractAddress and tokenId',
+    name: 'purchaseNFT',
+    description: 'Purchase an NFT',
     parameters: {
       type: 'object',
       properties: {
@@ -177,9 +190,7 @@ async function submitUserMessage(content: string) {
       content: `You are a helpful assistant. 
         Here's the flow: 
         1. List Reccomended nfts for a given wallet address.
-        2. List Opensea's orders for a selected NFT.
-        3. Choose an Order.
-        4. fulfill the Order (purchase the NFT).
+        2. fulfill the Order (purchase the NFT).
         `
     },
     {
@@ -274,22 +285,44 @@ async function submitUserMessage(content: string) {
           }
         ]
       })
+      // } else if (
+      //   response.choices[0].message?.function_call?.name === 'getNFTOrders'
+      // ) {
+      //   const { contractAddress, tokenId } = JSON.parse(
+      //     response.choices[0].message?.function_call?.arguments
+      //   )
+      //   console.log(contractAddress, tokenId, 'contract_address, token_id')
+
+      //   const orders = await getNFTOrders(contractAddress, tokenId)
+      //   console.log(orders, 'orders')
+      //   console.log(orders.orders[0].maker)
+      //   console.log(orders.orders[0])
+
+      //   uiStream.update(
+      //     <BotCard>
+      //       <ListOrders
+      //         orders={orders.orders}
+      //         contractAddress={contractAddress}
+      //         tokenId={tokenId}
+      //       />
+      //     </BotCard>
+      //   )
     } else if (
-      response.choices[0].message?.function_call?.name === 'getNFTOrders'
+      response.choices[0].message?.function_call?.name === 'purchaseNFT'
     ) {
-      const { contractAddress, tokenId } = JSON.parse(
+      const { orderHash, contractAddress, tokenId } = JSON.parse(
         response.choices[0].message?.function_call?.arguments
       )
-      console.log(contractAddress, tokenId, 'contract_address, token_id')
 
-      const orders = await getNFTOrders(contractAddress, tokenId)
-      console.log(orders, 'orders')
-      console.log(orders.orders[0].maker)
-      console.log(orders.orders[0])
+      console.log(orderHash, 'orderHash')
 
       uiStream.update(
         <BotCard>
-          <ListOrders orders={orders.orders} />
+          <PurchaseNFT
+            orderHash={orderHash}
+            contractAddress={contractAddress}
+            tokenId={tokenId}
+          />
         </BotCard>
       )
     }
@@ -318,99 +351,9 @@ async function purchaseNFT(orderHash: string) {
 
   uiStream.update(
     <BotCard>
-      <PurchaseTickets />
+      <PurchaseNFT />
     </BotCard>
   )
-
-  return {
-    id: nanoid(),
-    attachments: uiStream.value,
-    spinner: spinnerStream.value,
-    display: messageStream.value
-  }
-}
-
-async function describeImage(imageBase64: string) {
-  'use server'
-
-  await rateLimit()
-
-  const aiState = getMutableAIState()
-  const spinnerStream = createStreamableUI(null)
-  const messageStream = createStreamableUI(null)
-  const uiStream = createStreamableUI()
-
-  uiStream.update(
-    <BotCard>
-      <Video isLoading />
-    </BotCard>
-  )
-  ;(async () => {
-    try {
-      let text = ''
-
-      // attachment as video for demo purposes,
-      // add your implementation here to support
-      // video as input for prompts.
-      if (imageBase64 === '') {
-        await new Promise(resolve => setTimeout(resolve, 5000))
-
-        text = `
-      The books in this image are:
-
-      1. The Little Prince by Antoine de Saint-Exupéry
-      2. The Prophet by Kahlil Gibran
-      3. Man's Search for Meaning by Viktor Frankl
-      4. The Alchemist by Paulo Coelho
-      5. The Kite Runner by Khaled Hosseini
-      6. To Kill a Mockingbird by Harper Lee
-      7. The Catcher in the Rye by J.D. Salinger
-      8. The Great Gatsby by F. Scott Fitzgerald
-      9. 1984 by George Orwell
-      10. Animal Farm by George Orwell
-      `
-      } else {
-        const imageData = imageBase64.split(',')[1]
-
-        const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' })
-        const prompt = 'List the books in this image.'
-        const image = {
-          inlineData: {
-            data: imageData,
-            mimeType: 'image/png'
-          }
-        }
-
-        const result = await model.generateContent([prompt, image])
-        text = result.response.text()
-        console.log(text)
-      }
-
-      spinnerStream.done(null)
-      messageStream.done(null)
-
-      uiStream.done(
-        <BotCard>
-          <Video />
-        </BotCard>
-      )
-
-      aiState.done({
-        ...aiState.get(),
-        interactions: [text]
-      })
-    } catch (e) {
-      console.error(e)
-
-      const error = new Error(
-        'The AI got rate limited, please try again later.'
-      )
-      uiStream.error(error)
-      spinnerStream.error(error)
-      messageStream.error(error)
-      aiState.done()
-    }
-  })()
 
   return {
     id: nanoid(),
@@ -534,7 +477,6 @@ export const AI = createAI<AIState, UIState>({
     submitUserMessage,
     requestCode,
     validateCode,
-    describeImage,
     purchaseNFT
   },
   initialUIState: [],

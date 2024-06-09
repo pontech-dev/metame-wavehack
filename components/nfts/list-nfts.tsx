@@ -59,7 +59,7 @@ export const ListNFTs = ({ nfts, args }: ListNFTsProps) => {
               className="flex cursor-pointer flex-row items-start sm:items-center gap-4 rounded-xl p-2 hover:bg-zinc-50"
               onClick={async () => {
                 const response = await submitUserMessage(
-                  `The user has selected the NFT with token_id: ${nft.identifier} and contract: ${nft.contract}. now proceed to list the orders for this NFT.`
+                  `The user has selected the NFT with token_id: ${nft.identifier} and contract: ${nft.contract}. now proceed to purchase the NFT.`
                 )
                 setMessages((currentMessages: any[]) => [
                   ...currentMessages,

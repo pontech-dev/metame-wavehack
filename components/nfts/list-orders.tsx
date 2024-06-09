@@ -25,10 +25,16 @@ interface Order {
 
 interface ListOrdersProps {
   orders: Order[]
+  contractAddress: string
+  tokenId: string
 }
 
-export const ListOrders = ({ orders }: ListOrdersProps) => {
-  const { submitUserMessage, purchaseNFT } = useActions()
+export const ListOrders = ({
+  orders,
+  contractAddress,
+  tokenId
+}: ListOrdersProps) => {
+  const { submitUserMessage } = useActions()
   const [_, setMessages] = useUIState()
 
   console.log(orders)
@@ -53,15 +59,13 @@ export const ListOrders = ({ orders }: ListOrdersProps) => {
               key={order.order_hash}
               className="flex cursor-pointer flex-row items-start sm:items-center gap-4 rounded-xl p-2 hover:bg-zinc-50"
               onClick={async () => {
-                await purchaseNFT(order.order_hash)
-
-                //   const response = await submitUserMessage(
-                //     `The user has selected the NFT with token_id: ${nft.identifier} and contract: ${nft.contract}. now proceed to list the orders for this NFT.`
-                //   )
-                //   setMessages((currentMessages: any[]) => [
-                //     ...currentMessages,
-                //     response
-                //   ])
+                const response = await submitUserMessage(
+                  `The user has selected the order ${order.order_hash}. Contract Address: ${contractAddress}, TokenId: ${tokenId}. now proceed to purchase the NFT.`
+                )
+                setMessages((currentMessages: any[]) => [
+                  ...currentMessages,
+                  response
+                ])
               }}
             >
               <div className="w-10 sm:w-12 shrink-0 aspect-square rounded-lg bg-zinc-50 overflow-hidden">
