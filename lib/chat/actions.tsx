@@ -29,13 +29,7 @@ import { BoardingPass } from '@/components/flights/boarding-pass'
 import { PurchaseTickets } from '@/components/flights/purchase-ticket'
 import { CheckIcon, SpinnerIcon } from '@/components/ui/icons'
 import { format } from 'date-fns'
-import {
-  experimental_streamText,
-  OpenAIStream,
-  StreamingTextResponse
-} from 'ai'
-import { google } from 'ai/google'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+
 import OpenAI from 'openai'
 
 import { z } from 'zod'
@@ -44,9 +38,8 @@ import { Destinations } from '@/components/flights/destinations'
 import { Video } from '@/components/media/video'
 import { rateLimit } from './ratelimit'
 
-const genAI = new GoogleGenerativeAI(
-  process.env.GOOGLE_GENERATIVE_AI_API_KEY || ''
-)
+import { SparklesIcon } from '@/components/ui/icons'
+import { Suggestions } from '@/components/nfts/suggestions'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || ''
@@ -131,8 +124,41 @@ const getNFTOrders = async (contractAddress: string, tokenId: string) => {
   }
 }
 
+const getEventForAccount = async (walletAddress: string) => {
+  const url = `https://api.opensea.io/api/v2/events/accounts/${walletAddress}?event_type=order&limit=3`
+  const headers = {
+    accept: 'application/json',
+    'x-api-key': process.env.NEXT_PUBLIC_OPENSEA_API_KEY || ''
+  }
+
+  try {
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      throw new Error(`Network response was not ok: ${response.statusText}`)
+    }
+    const data = await response.json()
+    console.log(data, 'data')
+    return data
+  } catch (error) {
+    console.error('Error fetching NFT details:', error)
+    throw error
+  }
+}
+
 // Function definition:
 const functions: ChatCompletionCreateParams.Function[] = [
+  {
+    name: 'analyzeWallet',
+    description: 'Analyze the wallet address',
+    parameters: {
+      type: 'object',
+      properties: {
+        wallet_address: { type: 'string' },
+        balance: { type: 'number' }
+      },
+      required: ['wallet_address', 'balance']
+    }
+  },
   {
     name: 'getRecommendedNFTs',
     description: 'Get recommended NFTs for wallet',
@@ -164,6 +190,19 @@ const functions: ChatCompletionCreateParams.Function[] = [
   //   }
   // },
   {
+    name: 'explainNFT',
+    description: 'Explain why the AI has recommended this NFT.',
+    parameters: {
+      type: 'object',
+      properties: {
+        walletAddress: { type: 'string' },
+        contractAddress: { type: 'string' },
+        tokenId: { type: 'string' }
+      },
+      required: ['walletAddress', 'contractAddress', 'tokenId']
+    }
+  },
+  {
     name: 'purchaseNFT',
     description: 'Purchase an NFT',
     parameters: {
@@ -177,31 +216,47 @@ const functions: ChatCompletionCreateParams.Function[] = [
   }
 ]
 
+export const suggestions = [
+  'Change my seat',
+  'Change my flight',
+  'Show boarding pass'
+]
+
 async function submitUserMessage(content: string) {
   'use server'
+  const textStream = createStreamableValue('')
+  const spinnerStream = createStreamableUI(<SpinnerMessage />)
+  const messageStream = createStreamableUI(null)
+  const uiStream = createStreamableUI()
 
   await rateLimit()
 
   console.log(content, 'content')
 
-  const messages = [
-    {
-      role: 'system',
-      content: `You are a helpful assistant. 
-        Here's the flow: 
-        1. List Reccomended nfts for a given wallet address.
-        2. fulfill the Order (purchase the NFT).
-        `
-    },
-    {
-      role: 'user',
-      content
-    }
-  ]
-
-  console.log(messages, 'messages')
-
   try {
+    const aiState = getMutableAIState()
+
+    console.log(aiState.get(), 'aiState.get()')
+
+    const messages = [
+      {
+        role: 'system',
+        content: `You are a helpful assistant. 
+          Here's the flow: 
+          1. Analyze the wallet address and start conversation.
+          2. List Reccomended nfts for a given wallet address based on their messages.
+          3. fulfill the Order (purchase the NFT).
+          `
+      },
+      ...aiState.get().messages,
+      {
+        role: 'user',
+        content
+      }
+    ]
+
+    console.log(messages, 'messages')
+
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: messages,
@@ -213,23 +268,72 @@ async function submitUserMessage(content: string) {
 
     // 引数をparse
 
-    const aiState = getMutableAIState()
+    if (response.choices[0].message?.function_call?.name === 'analyzeWallet') {
+      const { wallet_address, balance } = JSON.parse(
+        response.choices[0].message?.function_call?.arguments
+      )
+      const events = await getEventForAccount(wallet_address)
+      console.log(events, 'events')
+      console.log(events.asset_events, 'events')
+      const nfts = events.asset_events.map((event: any) => {
+        console.log(event.asset, 'event.nft')
+        const { collection, name, description } = event.asset
+        if (event.asset)
+          return {
+            collection,
+            name,
+            description
+          }
+      })
+      console.log(nfts, 'test')
 
-    const textStream = createStreamableValue('')
-    const spinnerStream = createStreamableUI(<SpinnerMessage />)
-    const messageStream = createStreamableUI(null)
-    const uiStream = createStreamableUI()
-    if (
+      const analyzeWalletMessage = [
+        {
+          role: 'system',
+          content: `You are a helpful assistant. You have been asked to analyze the wallet address: ${wallet_address}.
+          the user has the following events in their account: ${JSON.stringify(nfts)}. user has ${balance}ETH in their wallet.
+          
+          expected output:
+          こんにちは。あなたのウォレット ${wallet_address}を分析したところ、最近〇〇というNFTを購入されたんですね。
+          そしてウォレットには0.1ETHが残っています。
+
+          今日はどんなNFTをお探しでしょうか？
+          `
+        }
+      ]
+
+      const explanation = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: analyzeWalletMessage
+      })
+      console.log(explanation.choices[0].message, 'explanation')
+      const textContent = explanation.choices[0].message?.content
+      messageStream.update(
+        <>
+          <BotMessage content={textContent} />
+          <Suggestions />
+        </>
+      )
+      spinnerStream.done(null)
+
+      aiState.done({
+        ...aiState.get(),
+        interactions: [],
+        messages: [
+          ...aiState.get().messages,
+          {
+            id: nanoid(),
+            role: 'assistant',
+            content: textContent
+          }
+        ]
+      })
+    } else if (
       response.choices[0].message?.function_call?.name === 'getRecommendedNFTs'
     ) {
       const { wallet_address, chain_id, limit, genre } = JSON.parse(
         response.choices[0].message?.function_call?.arguments
       )
-
-      // const chain_id = 1
-      // const wallet_address = '0xd8da6bf26964af9d7eed9e03e53415d37aa96045'
-      // const limit = 3
-      // const genre = 'art'
 
       const nfts = await getRecommendedNFTs(
         wallet_address,
@@ -260,6 +364,8 @@ async function submitUserMessage(content: string) {
         ]
       })
 
+      spinnerStream.done(null)
+
       uiStream.update(
         <BotCard>
           <ListNFTs nfts={nftDetails} args={{ wallet_address, genre }} />
@@ -285,28 +391,6 @@ async function submitUserMessage(content: string) {
           }
         ]
       })
-      // } else if (
-      //   response.choices[0].message?.function_call?.name === 'getNFTOrders'
-      // ) {
-      //   const { contractAddress, tokenId } = JSON.parse(
-      //     response.choices[0].message?.function_call?.arguments
-      //   )
-      //   console.log(contractAddress, tokenId, 'contract_address, token_id')
-
-      //   const orders = await getNFTOrders(contractAddress, tokenId)
-      //   console.log(orders, 'orders')
-      //   console.log(orders.orders[0].maker)
-      //   console.log(orders.orders[0])
-
-      //   uiStream.update(
-      //     <BotCard>
-      //       <ListOrders
-      //         orders={orders.orders}
-      //         contractAddress={contractAddress}
-      //         tokenId={tokenId}
-      //       />
-      //     </BotCard>
-      //   )
     } else if (
       response.choices[0].message?.function_call?.name === 'purchaseNFT'
     ) {
@@ -315,6 +399,7 @@ async function submitUserMessage(content: string) {
       )
 
       console.log(orderHash, 'orderHash')
+      spinnerStream.done(null)
 
       uiStream.update(
         <BotCard>
@@ -325,6 +410,41 @@ async function submitUserMessage(content: string) {
           />
         </BotCard>
       )
+    } else if (
+      response.choices[0].message?.function_call?.name === 'explainNFT'
+    ) {
+      const { walletAddress, contractAddress, tokenId } = JSON.parse(
+        response.choices[0].message?.function_call?.arguments
+      )
+      console.log(walletAddress, contractAddress, tokenId, 'walletAddress')
+      const events = await getEventForAccount(walletAddress)
+      console.log(events.asset_events, 'events')
+      const test = events.asset_events.map((event: any) => {
+        console.log(event.nft, 'event.nft')
+        return event.nft
+      })
+      console.log(test, 'test')
+
+      const explainNFTMessage = [
+        {
+          role: 'system',
+          content: `You are a helpful assistant. You have been asked to explain why the AI has recommended this NFT: ${contractAddress} with token_id: ${tokenId}.
+          please come up with a good explanation. the user has the following events in their account: ${events}`
+        }
+      ]
+
+      const explanation = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: explainNFTMessage
+      })
+      console.log(explanation.choices[0].message, 'explanation')
+      const textContent = explanation.choices[0].message?.content
+      messageStream.update(<BotMessage content={textContent} />)
+      spinnerStream.done(null)
+    } else {
+      const textContent = response.choices[0].message?.content
+      messageStream.update(<BotMessage content={textContent} />)
+      spinnerStream.done(null)
     }
 
     return {
@@ -342,8 +462,6 @@ async function purchaseNFT(orderHash: string) {
   'use server'
 
   await rateLimit()
-
-  console.log(orderHash, 'orderHash kkkkkkk')
 
   const spinnerStream = createStreamableUI(<SpinnerMessage />)
   const messageStream = createStreamableUI(null)

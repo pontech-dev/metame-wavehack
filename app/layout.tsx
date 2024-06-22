@@ -9,6 +9,13 @@ import { Header } from '@/components/header'
 import { Toaster } from '@/components/ui/sonner'
 import { KasadaClient } from '@/lib/kasada/kasada-client'
 
+import Web3ModalProvider from '@/context'
+import { cookieToInitialState } from 'wagmi'
+
+import { config } from '@/config'
+
+import { headers } from 'next/headers'
+
 export const metadata = {
   metadataBase: new URL(`https://${process.env.VERCEL_URL}`),
   title: {
@@ -36,6 +43,8 @@ interface RootLayoutProps {
 }
 
 export default function RootLayout({ children }: RootLayoutProps) {
+  const initialState = cookieToInitialState(config, headers().get('cookie'))
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -46,18 +55,20 @@ export default function RootLayout({ children }: RootLayoutProps) {
         )}
       >
         <Toaster position="top-center" />
-        <Providers
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <div className="flex flex-col min-h-screen">
-            <Header />
-            <main className="flex flex-col flex-1">{children}</main>
-          </div>
-          <TailwindIndicator />
-        </Providers>
+        <Web3ModalProvider initialState={initialState}>
+          <Providers
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <div className="flex flex-col min-h-screen">
+              <Header />
+              <main className="flex flex-col flex-1">{children}</main>
+            </div>
+            {/* <TailwindIndicator /> */}
+          </Providers>
+        </Web3ModalProvider>
         <Analytics />
       </body>
     </html>

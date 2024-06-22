@@ -12,10 +12,8 @@ import { useEffect, useState } from 'react'
 
 import '@rainbow-me/rainbowkit/styles.css'
 import { getDefaultConfig, RainbowKitProvider } from '@rainbow-me/rainbowkit'
-import { WagmiProvider, useAccount, useSendTransaction } from 'wagmi'
+import { useAccount, useSendTransaction } from 'wagmi'
 import { mainnet, polygon } from 'wagmi/chains'
-import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
-import { ConnectButton } from '@rainbow-me/rainbowkit'
 
 import { OpenSeaSDK, Chain, OrderSide } from 'opensea-js'
 import { ethers } from 'ethers'
@@ -90,14 +88,21 @@ export const PurchaseNFT = ({
   }, [])
 
   const fulfillOrder = async () => {
+    console.log(account, 'account')
+    if (!account) return
     if (!order) return
     console.log(order, 'order')
-    const transactionHash = await openseaSDK?.fulfillOrder({
-      order,
-      accountAddress: account.address!
-    })
+    try {
+      const transactionHash = await openseaSDK?.fulfillOrder({
+        order,
+        accountAddress: account.address!
+      })
 
-    console.log(transactionHash, 'transactionHash')
+      console.log(transactionHash, 'transactionHash')
+    } catch (e) {
+      console.log(e, 'error')
+      alert(e)
+    }
   }
 
   return (
@@ -132,13 +137,17 @@ export const PurchaseNFT = ({
             </div>
             <div className="text-xs text-zinc-600">{order?.createdDate}</div>
             <p className="">ウォレットを接続して購入してください。</p>
-            <ConnectButton />
-            <button
-              className="p-2 text-center rounded-full cursor-pointer bg-zinc-900 text-zinc-50 hover:bg-zinc-600 transition-colors"
-              onClick={async () => await fulfillOrder()}
-            >
-              購入
-            </button>
+            {account.isConnected ? (
+              <button
+                className="p-2 text-center rounded-full cursor-pointer bg-zinc-900 text-zinc-50 hover:bg-zinc-600 transition-colors"
+                onClick={async () => await fulfillOrder()}
+              >
+                購入
+              </button>
+            ) : (
+              // <ConnectButton />
+              <></>
+            )}
           </div>
         ) : currentStatus === 'requires_code' ? (
           <>
