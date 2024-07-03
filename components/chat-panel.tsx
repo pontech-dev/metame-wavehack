@@ -17,6 +17,15 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useWeb3Modal } from '@web3modal/wagmi/react'
 import { useAccount, useBalance } from 'wagmi'
+import { encodeFunctionData, parseAbi } from 'viem'
+
+import {
+  useSendSponsoredTransaction,
+  useSmartAccount,
+  useUserOpWait,
+  useSendTransaction
+} from '@biconomy/use-aa'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
 
 export interface ChatPanelProps {
   id?: string
@@ -45,6 +54,37 @@ export function ChatPanel({
   const { data: ethBalance } = useBalance({
     address: address
   })
+
+  const { smartAccountAddress } = useSmartAccount()
+
+  const {
+    mutate,
+    data: userOpResponse,
+    error,
+    isPending
+  } = useSendTransaction()
+
+  const {
+    isLoading: waitIsLoading,
+    isSuccess: waitIsSuccess,
+    error: waitError,
+    data: waitData
+  } = useUserOpWait(userOpResponse)
+
+  const mintNftTx = () =>
+    mutate({
+      transactions: {
+        to: '0x1758f42Af7026fBbB559Dc60EcE0De3ef81f665e',
+        data: encodeFunctionData({
+          abi: parseAbi(['function safeMint(address _to)']),
+          functionName: 'safeMint',
+          args: [smartAccountAddress]
+        })
+      }
+    })
+
+  console.log(error)
+  console.log(waitError)
 
   const exampleMessages = [
     {
@@ -128,14 +168,24 @@ export function ChatPanel({
                     </div>
                   </div>
                 ))}
+              <p>"smartAccountAddress": {smartAccountAddress}</p>
+              <button
+                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                onClick={() => mintNftTx()}
+              >
+                {waitIsLoading || isPending ? 'Executing...' : 'Mint an NFT'}
+              </button>
             </>
           ) : (
-            <button
-              className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-              onClick={() => open()}
-            >
-              Connect Wallet
-            </button>
+            // <button
+            //   className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            //   onClick={() => open()}
+            // >
+            //   Connect Wallet
+            // </button>
+            <>
+              <ConnectButton />
+            </>
           )}
         </div>
 

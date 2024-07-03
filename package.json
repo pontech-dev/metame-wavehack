@@ -13,6 +13,8 @@
     "format:check": "prettier --check \"{app,lib,components}**/*.{ts,tsx,mdx}\" --cache"
   },
   "dependencies": {
+    "@biconomy/account": "^4.4.6",
+    "@biconomy/use-aa": "^1.0.14",
     "@google/generative-ai": "^0.3.1",
     "@radix-ui/react-alert-dialog": "^1.0.5",
     "@radix-ui/react-dialog": "^1.0.5",
@@ -31,6 +33,7 @@
     "@vercel/kv": "^1.0.1",
     "@vercel/og": "^0.6.2",
     "@web3modal/wagmi": "^5.0.3",
+    "@zerodev/sdk": "^5.3.2",
     "ai": "^3.0.17",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",

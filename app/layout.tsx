@@ -7,7 +7,6 @@ import { TailwindIndicator } from '@/components/tailwind-indicator'
 import { Providers } from '@/components/providers'
 import { Header } from '@/components/header'
 import { Toaster } from '@/components/ui/sonner'
-import { KasadaClient } from '@/lib/kasada/kasada-client'
 
 import Web3ModalProvider from '@/context'
 import { cookieToInitialState } from 'wagmi'
