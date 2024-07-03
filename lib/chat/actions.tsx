@@ -294,7 +294,7 @@ async function submitUserMessage(content: string) {
           the user has the following events in their account: ${JSON.stringify(nfts)}. user has ${balance}ETH in their wallet.
           
           expected output:
-          こんにちは。あなたのウォレット ${wallet_address}を分析したところ、最近〇〇というNFTを購入されたんですね。
+          こんにちは。あなたのウォレット ${wallet_address}を分析したところ、最近〇〇というNFTを入手されたようですね / 何も購入していませんね。
           そしてウォレットには0.1ETHが残っています。
 
           今日はどんなNFTをお探しでしょうか？
